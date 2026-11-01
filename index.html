@@ -1,0 +1,901 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Laboratorio FIFO</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Concepto: un laboratorio oscuro de instrumentos. SSD a la izquierda, RAM al centro, tabla de páginas a la derecha.
+   Cada página tiene un color propio y lo conserva en toda la interfaz para poder seguirla con la vista. */
+:root{
+  --bg:#080d1c; --panel:#111a3a; --panel2:#17224b; --line:#27346a;
+  --fg:#eaf0ff; --muted:#9db0e0; --accent:#7c8dff; --accent2:#22d3ee;
+  --hit:#2ee6a6; --fault:#ffb020; --evict:#ff5d8f;
+  --fifo:#a99bff; --lru:#22d3ee; --opt:#2ee6a6;
+  --chipfg:#0a1022; --shadow:0 12px 32px rgba(0,0,0,.38);
+  --glow1:color-mix(in oklab,var(--accent) 24%,transparent); --glow2:color-mix(in oklab,var(--accent2) 14%,transparent);
+  --f-display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;
+  --f-body:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#edf1fc; --panel:#ffffff; --panel2:#f1f4ff; --line:#cdd7f3;
+    --fg:#101938; --muted:#505e8c; --accent:#4655f0; --accent2:#0b86a8;
+    --hit:#0c8f63; --fault:#b86e00; --evict:#d81b60;
+    --fifo:#5b49e6; --lru:#0b86a8; --opt:#0c8f63;
+    --shadow:0 10px 28px rgba(40,56,120,.14); color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#edf1fc; --panel:#ffffff; --panel2:#f1f4ff; --line:#cdd7f3;
+  --fg:#101938; --muted:#505e8c; --accent:#4655f0; --accent2:#0b86a8;
+  --hit:#0c8f63; --fault:#b86e00; --evict:#d81b60;
+  --fifo:#5b49e6; --lru:#0b86a8; --opt:#0c8f63;
+  --shadow:0 10px 28px rgba(40,56,120,.14); color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:auto}
+body{margin:0;background:radial-gradient(900px 420px at 88% -8%,var(--glow1),transparent),radial-gradient(800px 420px at -8% 4%,var(--glow2),transparent),var(--bg);
+  color:var(--fg);font:14px/1.45 var(--f-body);padding-block:18px 28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.app{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+h1,h2,h3{margin:0;font-family:var(--f-display);text-wrap:balance}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* Encabezado */
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.logo{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(140deg,var(--accent),var(--accent2));box-shadow:0 6px 20px var(--glow1);flex:none}
+.logo svg{width:24px;height:24px}
+h1{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1.05}
+.sub{color:var(--muted);font-size:12.5px}
+.tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:14px;background:color-mix(in oklab,var(--panel) 80%,transparent);flex-wrap:wrap}
+.tab{border:0;background:transparent;padding:8px 14px;border-radius:10px;font-weight:600;color:var(--muted);transition:.18s}
+.tab:hover{color:var(--fg)}
+.tab[aria-selected="true"]{background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 55%,var(--accent2)));color:#fff;box-shadow:0 4px 14px var(--glow1)}
+
+.card{background:linear-gradient(180deg,color-mix(in oklab,var(--panel2) 55%,var(--panel)),var(--panel));border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);min-width:0}
+.pad{padding:14px}
+.lbl{font:600 10.5px/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+/* Configuración */
+.config{display:grid;grid-template-columns:1fr auto;gap:12px 18px;align-items:start}
+.cfg-block{display:flex;flex-direction:column;gap:8px;min-width:0}
+.seq-row{display:flex;gap:8px;flex-wrap:wrap}
+.seq-row input{flex:1 1 220px;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-family:var(--f-mono);font-weight:500;letter-spacing:.04em}
+.seq-row input[aria-invalid="true"]{border-color:var(--evict)}
+.btn{border:1px solid var(--line);background:var(--panel2);padding:8px 12px;border-radius:10px;font-weight:600;display:inline-flex;gap:6px;align-items:center;justify-content:center;transition:.15s;white-space:nowrap}
+.btn:hover{border-color:var(--accent);transform:translateY(-1px)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 55%,var(--accent2)));color:#fff;border-color:transparent}
+.btn[disabled]{opacity:.4;cursor:not-allowed;transform:none}
+.btn svg{width:16px;height:16px;fill:currentColor}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.preset{border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 11px;font-size:12px;color:var(--muted)}
+.preset:hover{color:var(--fg);border-color:var(--accent2)}
+.err{color:var(--evict);font-size:12px;min-height:16px}
+.palette{display:flex;gap:4px;flex-wrap:wrap}
+.palette button{width:28px;height:28px;border-radius:8px;border:0;font:700 12px var(--f-mono);background:var(--c);color:var(--chipfg)}
+.palette button:hover{transform:translateY(-2px)}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);font-weight:700;font-size:16px}
+.stepper button:hover{border-color:var(--accent)}
+.stepper output{min-width:34px;text-align:center;font:700 20px var(--f-mono)}
+.cfg-right{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+
+/* Fichas de página */
+.pc{--c:hsl(var(--h) 88% 64%)}
+.chip{display:inline-grid;place-items:center;min-width:34px;height:30px;padding:0 8px;border-radius:9px;font:700 13px var(--f-mono);color:var(--chipfg);
+  background:linear-gradient(150deg,color-mix(in oklab,var(--c) 70%,#fff),var(--c));box-shadow:0 2px 8px color-mix(in oklab,var(--c) 40%,transparent)}
+.chip.big{width:48px;height:48px;border-radius:13px;font-size:16px;padding:0}
+.fly{position:fixed;z-index:60;pointer-events:none;margin:0}
+
+/* Simulador */
+.sim-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.transport{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+.transport .grow{flex:1}
+.speed{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.speed input{width:96px;accent-color:var(--accent)}
+.toggle{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--panel2);font-weight:600;font-size:13px;user-select:none}
+.toggle input{accent-color:var(--accent2);width:16px;height:16px}
+
+.rail{display:flex;flex-wrap:wrap;gap:6px}
+.rchip{display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid transparent;border-radius:11px;padding:4px 3px 3px;background:transparent;min-width:40px}
+.rchip .chip{opacity:.38;transition:.2s}
+.rchip.done .chip{opacity:1}
+.rchip .dot{width:14px;height:4px;border-radius:2px;background:var(--line)}
+.rchip.done.h .dot{background:var(--hit)}
+.rchip.done.f .dot{background:var(--fault)}
+.rchip.cur{border-color:var(--accent2);background:color-mix(in oklab,var(--accent2) 12%,transparent)}
+.rchip .ix{font:500 9.5px var(--f-mono);color:var(--muted)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+.stage-grid{display:grid;grid-template-columns:150px minmax(0,1fr) 188px;gap:14px;align-items:stretch}
+.zone{border:1px solid var(--line);border-radius:14px;padding:10px;background:color-mix(in oklab,var(--bg) 55%,var(--panel));display:flex;flex-direction:column;gap:9px;min-width:0}
+.zone h3{font-size:14px;display:flex;align-items:center;gap:7px}
+.zone h3 span{font:600 10px var(--f-mono);letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+.zone small{color:var(--muted);font-size:11.5px;line-height:1.35}
+.ssd-pages{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+.ssd-card{display:flex;flex-direction:column;align-items:center;gap:4px;border:1px dashed var(--line);border-radius:10px;padding:6px 4px;font:500 9.5px var(--f-mono);color:var(--muted);transition:.2s}
+.ssd-card.copied{border-style:solid;border-color:color-mix(in oklab,var(--hit) 55%,var(--line));color:var(--hit)}
+.ssd-card.src{box-shadow:0 0 0 2px var(--accent2)}
+.mid{gap:12px}
+.cpu{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--panel2);min-height:64px}
+.cpu svg{width:30px;height:30px;color:var(--accent2);flex:none}
+.cpu .who{display:flex;flex-direction:column;gap:3px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font:700 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent}
+.pill.hit{color:var(--hit);background:color-mix(in oklab,var(--hit) 15%,transparent);border-color:color-mix(in oklab,var(--hit) 45%,transparent)}
+.pill.fault{color:var(--fault);background:color-mix(in oklab,var(--fault) 15%,transparent);border-color:color-mix(in oklab,var(--fault) 45%,transparent)}
+.pill.evict{color:var(--evict);background:color-mix(in oklab,var(--evict) 15%,transparent);border-color:color-mix(in oklab,var(--evict) 45%,transparent)}
+.pill.idle{color:var(--muted);background:transparent;border-color:var(--line)}
+.arrow-down{align-self:center;color:var(--muted);font:700 11px var(--f-mono);letter-spacing:.1em}
+.frames{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.frame{position:relative;width:96px;border:2px dashed var(--line);border-radius:14px;padding:6px 6px 7px;display:flex;flex-direction:column;align-items:center;gap:5px;background:color-mix(in oklab,var(--bg) 40%,var(--panel));transition:border-color .2s,box-shadow .25s}
+.frame:not(.empty){border-style:solid;border-color:color-mix(in oklab,var(--c) 60%,var(--line))}
+.frame .f-top{display:flex;justify-content:space-between;width:100%;font:600 9.5px var(--f-mono);letter-spacing:.08em;color:var(--muted)}
+.frame .rank{color:var(--fg);background:var(--panel2);border-radius:6px;padding:0 5px}
+.frame .f-body{height:50px;display:grid;place-items:center}
+.frame .free{font:500 11px var(--f-mono);color:var(--muted)}
+.frame .f-foot{font:500 9.5px var(--f-mono);color:var(--muted);height:12px}
+.frame .tag{position:absolute;left:50%;bottom:-9px;transform:translateX(-50%);white-space:nowrap;font:700 9px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+.frame .tag.out{background:color-mix(in oklab,var(--evict) 22%,var(--panel));border-color:var(--evict);color:var(--evict)}
+.frame.new{border-color:var(--fault);box-shadow:0 0 0 3px color-mix(in oklab,var(--fault) 28%,transparent),0 0 22px color-mix(in oklab,var(--fault) 30%,transparent)}
+.frame.hit{border-color:var(--hit);box-shadow:0 0 0 3px color-mix(in oklab,var(--hit) 28%,transparent),0 0 22px color-mix(in oklab,var(--hit) 30%,transparent)}
+.frame.victim{border-color:var(--evict);animation:pulse .7s ease-in-out infinite alternate}
+.frame.pick{cursor:pointer;border-color:var(--accent2);border-style:dashed}
+.frame.pick:hover{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent2) 30%,transparent)}
+.frame.wrong{animation:shake .4s}
+@keyframes pulse{from{box-shadow:0 0 0 2px color-mix(in oklab,var(--evict) 25%,transparent)}to{box-shadow:0 0 0 6px color-mix(in oklab,var(--evict) 35%,transparent),0 0 26px color-mix(in oklab,var(--evict) 45%,transparent)}}
+@keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.queue{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;border-top:1px dashed var(--line);padding-top:10px;margin-top:6px;margin-bottom:2px}
+.queue .qe{font:700 10px var(--f-mono);letter-spacing:.08em;color:var(--muted)}
+.queue .qe.out{color:var(--evict)} .queue .qe.in{color:var(--hit)}
+.qi{display:flex;flex-direction:column;align-items:center;gap:2px;font:500 9px var(--f-mono);color:var(--muted)}
+.pt{width:100%;border-collapse:collapse}
+.pt th{font:600 9.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 4px 5px}
+.pt td{padding:4px;border-top:1px solid color-mix(in oklab,var(--line) 70%,transparent);font:500 11.5px var(--f-mono)}
+.pt tr.lookup td{background:color-mix(in oklab,var(--accent2) 16%,transparent)}
+.pt tr.miss td{background:color-mix(in oklab,var(--fault) 18%,transparent)}
+.pt .v1{color:var(--hit)} .pt .v0{color:var(--muted)}
+.pt .chip{height:24px;min-width:30px;font-size:11px;border-radius:7px}
+
+/* Estadísticas y explicación */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:var(--panel2)}
+.stat b{display:block;font:800 26px/1.1 var(--f-display);font-variant-numeric:tabular-nums}
+.stat span{font-size:11.5px;color:var(--muted)}
+.stat.f b{color:var(--fault)} .stat.h b{color:var(--hit)}
+.bar{height:8px;border-radius:5px;background:var(--line);overflow:hidden;display:flex;margin-top:4px}
+.bar i{display:block;height:100%;transition:width .35s}
+.ex-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}
+.ex-step{font:500 11px var(--f-mono);color:var(--muted)}
+.ex-main{margin:0 0 8px;font-size:14px}
+.ex-insight{border-left:3px solid var(--accent);padding:6px 10px;background:color-mix(in oklab,var(--accent) 11%,transparent);border-radius:0 9px 9px 0;font-size:13px;margin-top:8px}
+.ex-insight.warn{border-color:var(--evict);background:color-mix(in oklab,var(--evict) 11%,transparent)}
+.ex-insight.good{border-color:var(--hit);background:color-mix(in oklab,var(--hit) 11%,transparent)}
+details.gl{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;font-size:12.5px}
+details.gl summary{cursor:pointer;font-weight:600;color:var(--muted)}
+details.gl dl{margin:8px 0 0;display:grid;gap:5px}
+details.gl dt{font-weight:600;color:var(--fg)} details.gl dd{margin:0 0 3px;color:var(--muted)}
+
+/* Tabla de traza */
+.trace-wrap{overflow-x:auto;padding-bottom:4px}
+.trace{border-collapse:separate;border-spacing:3px;font-family:var(--f-mono)}
+.trace th{position:sticky;left:0;background:var(--panel);z-index:1;text-align:left;font:600 10px var(--f-mono);letter-spacing:.06em;color:var(--muted);padding:0 8px 0 2px;white-space:nowrap;text-transform:uppercase}
+.trace td{width:34px;min-width:34px;height:30px;text-align:center;border-radius:8px;padding:0}
+.trace td.future{opacity:.28}
+.trace td.cur .tc,.trace td.cur .rq{outline:2px solid var(--accent2);outline-offset:1px}
+.trace td.sel{background:color-mix(in oklab,var(--accent2) 14%,transparent)}
+.trace.click td[data-j]{cursor:pointer}
+.rq{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--c);color:var(--chipfg);font:700 12px var(--f-mono)}
+.tc{display:grid;place-items:center;width:100%;height:100%;border-radius:8px;font:700 12px var(--f-mono);
+  background:color-mix(in oklab,var(--c) 17%,transparent);border:1px solid color-mix(in oklab,var(--c) 40%,transparent);color:color-mix(in oklab,var(--c) 70%,var(--fg))}
+.tc.new{background:color-mix(in oklab,var(--fault) 30%,transparent);border-color:var(--fault);color:var(--fg)}
+.tc.hitc{background:color-mix(in oklab,var(--hit) 28%,transparent);border-color:var(--hit);color:var(--fg)}
+.trace td.empty{border:1px dashed color-mix(in oklab,var(--line) 70%,transparent)}
+.trace td.res{font-weight:700;font-size:15px}
+.trace td.res.ok{color:var(--hit)} .trace td.res.ko{color:var(--fault)}
+.trace td.ev{font-size:11px;font-weight:700;color:var(--evict)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:4px 10px;font-size:12px;color:var(--muted);font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.sec-head h2{font-size:17px}
+
+/* Comparador */
+.sum-bars{display:grid;gap:8px}
+.sb{display:grid;grid-template-columns:78px 1fr 70px;gap:10px;align-items:center;font-size:13px}
+.sb .track{height:14px;border-radius:7px;background:var(--line);overflow:hidden}
+.sb .track i{display:block;height:100%;border-radius:7px;transition:width .4s}
+.sb b{font:700 15px var(--f-mono);text-align:right}
+.algo{display:flex;align-items:center;gap:8px;font:800 15px var(--f-display)}
+.algo i{width:12px;height:12px;border-radius:4px;display:inline-block}
+.cmp-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}
+.rule{color:var(--muted);font-size:12.5px}
+.big-n{font:800 28px/1 var(--f-display);text-align:right}
+.big-n small{display:block;font:500 11px var(--f-body);color:var(--muted)}
+.dec{display:grid;gap:8px}
+.dec-row{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:start;border:1px solid var(--line);border-radius:11px;padding:8px 10px;background:var(--panel2);font-size:13px}
+.dec-row .algo{font-size:14px}
+
+/* Belady */
+.bel-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px;align-items:start}
+#chart{width:100%}
+#chart svg{display:block;width:100%}
+.ax{fill:var(--muted);font:500 11px var(--f-mono)}
+.gridl{stroke:var(--line);stroke-width:1;opacity:.7}
+.verdict{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--panel2);font-size:13.5px}
+.verdict.bad{border-color:var(--evict);background:color-mix(in oklab,var(--evict) 10%,var(--panel2))}
+.verdict.ok{border-color:color-mix(in oklab,var(--hit) 55%,var(--line))}
+.verdict b.n{font:800 18px var(--f-display)}
+.sel-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sel-row select{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mini-tbl{width:100%;border-collapse:collapse;font:500 12.5px var(--f-mono)}
+.mini-tbl th,.mini-tbl td{padding:5px 8px;text-align:center;border-bottom:1px solid var(--line)}
+.mini-tbl th{font-size:10.5px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.mini-tbl tr.anom td{background:color-mix(in oklab,var(--evict) 14%,transparent)}
+.mini-tbl tr.selr td{box-shadow:inset 0 0 0 1px var(--accent2)}
+.foot{color:var(--muted);font-size:12px;max-width:100ch}
+
+@media (max-width:1060px){
+  .sim-layout{grid-template-columns:minmax(0,1fr)}
+  .bel-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:720px){
+  .config{grid-template-columns:minmax(0,1fr)}
+  .stage-grid{grid-template-columns:1fr 1fr;grid-template-areas:"mid mid" "ssd pt"}
+  .stage-grid .mid{grid-area:mid}.stage-grid .ssdz{grid-area:ssd}.stage-grid .ptz{grid-area:pt}
+  .pair{grid-template-columns:minmax(0,1fr)}
+  h1{font-size:22px}
+  .sb{grid-template-columns:64px 1fr 56px}
+}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="16" rx="1.5"/><path d="M18 8l3 4-3 4"/></svg></div>
+      <div><h1>Laboratorio FIFO</h1><div class="sub">Reemplazo de páginas en memoria virtual · Sistemas operativos</div></div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button class="tab" role="tab" data-tab="simulador" aria-selected="true">Simulador</button>
+      <button class="tab" role="tab" data-tab="comparar" aria-selected="false">Comparar algoritmos</button>
+      <button class="tab" role="tab" data-tab="belady" aria-selected="false">Anomalía de Belady</button>
+    </nav>
+  </header>
+
+  <section class="card pad config" aria-label="Configuración">
+    <div class="cfg-block">
+      <span class="lbl">Páginas que pide el programa, en orden</span>
+      <div class="seq-row">
+        <input id="seqInput" aria-label="Secuencia de páginas" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="seqErr">
+        <button class="btn primary" id="applySeq">Aplicar</button>
+      </div>
+      <div class="err" id="seqErr" role="alert"></div>
+      <div class="chips" id="presets"></div>
+    </div>
+    <div class="cfg-right">
+      <div>
+        <span class="lbl">Marcos en la RAM</span>
+        <div class="stepper" style="margin-top:6px"><button id="nMinus" aria-label="Quitar un marco">−</button><output id="nOut" class="mono">3</output><button id="nPlus" aria-label="Agregar un marco">+</button></div>
+      </div>
+      <div>
+        <span class="lbl">Agregar petición al final</span>
+        <div class="palette" id="palette" style="margin-top:6px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIMULADOR -->
+  <main id="tab-simulador" class="sim-layout">
+    <div class="col">
+      <section class="card pad">
+        <div class="transport">
+          <button class="btn" id="bReset" aria-label="Reiniciar"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>Reiniciar</button>
+          <button class="btn" id="bPrev" aria-label="Paso anterior"><svg viewBox="0 0 24 24"><path d="M15 5l-8 7 8 7z"/></svg>Anterior</button>
+          <button class="btn primary" id="bPlay" aria-label="Reproducir"><svg viewBox="0 0 24 24" id="playIcon"><path d="M7 4l13 8-13 8z"/></svg><span id="playTxt">Reproducir</span></button>
+          <button class="btn" id="bNext" aria-label="Paso siguiente">Siguiente<svg viewBox="0 0 24 24"><path d="M9 5l8 7-8 7z"/></svg></button>
+          <span class="grow"></span>
+          <label class="toggle"><input type="checkbox" id="predict"> Modo predicción</label>
+          <label class="speed">Velocidad <input type="range" id="speed" min="0.5" max="3" step="0.25" value="1" aria-label="Velocidad"><output id="speedOut" class="mono">1×</output></label>
+        </div>
+        <div class="rail" id="rail" style="margin-top:12px" aria-label="Peticiones"></div>
+        <div class="legend" style="margin-top:8px"><span><i style="background:var(--hit)"></i>Acierto</span><span><i style="background:var(--fault)"></i>Fallo de página</span><span>Toca una petición para saltar a ese paso</span></div>
+      </section>
+
+      <section class="card pad">
+        <div class="stage-grid">
+          <div class="zone ssdz">
+            <h3>SSD <span>Archivero</span></h3>
+            <div class="ssd-pages" id="ssd"></div>
+            <small>Todo el programa vive aquí. A la RAM solo se copian las páginas en uso.</small>
+          </div>
+          <div class="zone mid">
+            <div class="cpu" id="cpu"></div>
+            <div class="arrow-down">▼ TABLA DE PÁGINAS ▼</div>
+            <h3>RAM <span id="ramInfo">Escritorio</span></h3>
+            <div class="frames" id="frames"></div>
+            <div class="queue" id="queue"></div>
+          </div>
+          <div class="zone ptz">
+            <h3>Tabla <span>de páginas</span></h3>
+            <table class="pt" id="pt"><thead><tr><th>Pág.</th><th>Válida</th><th>Dónde</th></tr></thead><tbody></tbody></table>
+            <small>Válida 1 = está en la RAM. Válida 0 = fallo de página si se pide.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="card pad">
+        <div class="sec-head">
+          <h2>Historial de memoria</h2>
+          <div class="seg" role="group" aria-label="Vista de la tabla"><button id="vQueue" aria-pressed="true">Por antigüedad</button><button id="vSlot" aria-pressed="false">Por marco</button></div>
+        </div>
+        <div class="trace-wrap" id="traceSim"></div>
+        <div class="legend" style="margin-top:6px"><span>Amarillo: página recién cargada</span><span>Verde: acierto</span><span class="mono" style="color:var(--evict)">−P1: página que sale</span></div>
+      </section>
+    </div>
+
+    <aside class="col">
+      <section class="card pad"><div class="stats" id="stats"></div></section>
+      <section class="card pad" id="explain" aria-live="polite"></section>
+    </aside>
+  </main>
+
+  <!-- COMPARAR -->
+  <main id="tab-comparar" hidden class="col">
+    <section class="card pad">
+      <div class="sec-head"><h2>Mismos datos, tres criterios</h2><span class="sub" id="cmpInfo"></span></div>
+      <div class="sum-bars" id="sumBars"></div>
+      <p class="rule" id="cmpMsg" style="margin:10px 0 0"></p>
+    </section>
+    <div id="cmpCards" class="col"></div>
+    <section class="card pad">
+      <div class="sec-head"><h2>Decisión en el paso <span id="decStep" class="mono"></span></h2><span class="sub">Toca una columna de cualquier tabla para cambiar de paso</span></div>
+      <div class="dec" id="dec"></div>
+    </section>
+  </main>
+
+  <!-- BELADY -->
+  <main id="tab-belady" hidden class="col">
+    <div class="bel-grid">
+      <section class="card pad">
+        <div class="sec-head"><h2>Fallos según el tamaño de la RAM</h2>
+          <div class="legend" id="belLegend"><span><i style="background:var(--fifo)"></i>FIFO</span><span><i style="background:var(--lru)"></i>LRU</span><span><i style="background:var(--opt)"></i>Óptimo</span><span><i style="background:var(--evict)"></i>Anomalía</span></div></div>
+        <div id="chart"></div>
+        <p class="rule" style="margin:6px 0 0">Toca un punto del eje para comparar ese tamaño con el anterior.</p>
+      </section>
+      <section class="col">
+        <div class="verdict" id="belVerdict"></div>
+        <div class="card pad">
+          <span class="lbl">Experimentar</span>
+          <div class="chips" style="margin-top:8px">
+            <button class="btn" id="belLoad">Cargar secuencia de Belady</button>
+            <button class="btn" id="belFind">Buscar una anomalía al azar</button>
+          </div>
+          <div style="margin-top:12px"><table class="mini-tbl" id="belTbl"></table></div>
+        </div>
+      </section>
+    </div>
+    <section class="card pad">
+      <div class="sec-head"><h2>FIFO frente a sí mismo</h2>
+        <div class="sel-row"><label>Menos RAM <select id="belA"></select></label><label>Más RAM <select id="belB"></select></label>
+        <button class="btn" id="belGo">Abrir en el simulador</button></div></div>
+      <div class="pair" id="belPair"></div>
+    </section>
+    <section class="card pad">
+      <h2 style="font-size:17px;margin-bottom:6px">¿Por qué pasa?</h2>
+      <p class="rule" style="margin:0;font-size:13.5px;color:var(--fg)">FIFO no mira cuánto se usa una página, solo cuándo entró. Con otro número de marcos las páginas salen en momentos distintos, y a veces sale justo una que se vuelve a pedir enseguida. LRU y el Óptimo siempre conservan en la RAM al menos lo que tendrían con menos marcos, por eso no sufren esta anomalía. No ocurre con cualquier secuencia: depende de cómo se pidan las páginas.</p>
+    </section>
+  </main>
+
+  <p class="foot">Modelo educativo: simula un solo programa y cuenta cada petición como una referencia a una página. No mide tiempos reales ni modela la escritura de páginas modificadas al SSD. Con LRU y Óptimo, los empates se resuelven sacando la página que entró primero.</p>
+</div>
+
+<script>
+/* ============ MOTOR (lógica pura, sin DOM) ============ */
+function nextUse(seq, page, i){ for(let j=i+1;j<seq.length;j++) if(seq[j]===page) return j; return -1; }
+function simulate(seq, n, algo){
+  const frames=Array(n).fill(null), loadT=Array(n).fill(-1), useT=Array(n).fill(-1), hitsSince=Array(n).fill(0);
+  const ever=new Set(); const steps=[]; let faults=0,hits=0,reloads=0;
+  const argmin=(arr)=>{let b=-1;for(let s=0;s<arr.length;s++){ if(b<0||arr[s]<arr[b]) b=s;} return b;};
+  for(let i=0;i<seq.length;i++){
+    const p=seq[i], hs=frames.indexOf(p), st={i,p,hit:hs>=0,evicted:null,reload:false};
+    if(st.hit){ hits++; useT[hs]=i; hitsSince[hs]++; st.slot=hs; }
+    else{
+      faults++; st.reload=ever.has(p); if(st.reload) reloads++;
+      let slot=frames.indexOf(null);
+      if(slot<0){
+        if(algo==='fifo') slot=argmin(loadT);
+        else if(algo==='lru') slot=argmin(useT);
+        else{
+          let best=-1,bestN=-2;
+          for(let s=0;s<n;s++){
+            let nx=nextUse(seq,frames[s],i); const v=nx<0?Infinity:nx;
+            if(v>bestN || (v===bestN && loadT[s]<loadT[best])){best=s;bestN=v;}
+          }
+          slot=best;
+        }
+        st.evicted=frames[slot]; st.evLoad=loadT[slot]; st.evUse=useT[slot]; st.evHits=hitsSince[slot];
+        st.evNext=nextUse(seq,st.evicted,i); st.evSlot=slot;
+        st.lruAlt=frames[argmin(useT)];
+        st.full=true;
+      }
+      frames[slot]=p; loadT[slot]=i; useT[slot]=i; hitsSince[slot]=0; ever.add(p); st.slot=slot;
+    }
+    st.frames=frames.slice(); st.loadT=loadT.slice();
+    const occ=frames.map((f,s)=>({f,s,t:loadT[s]})).filter(o=>o.f!==null).sort((a,b)=>a.t-b.t);
+    st.queue=occ.map(o=>o.f); st.qslots=occ.map(o=>o.s); st.qtimes=occ.map(o=>o.t);
+    st.faults=faults; st.hits=hits; st.reloads=reloads;
+    steps.push(st);
+  }
+  return {algo,n,seq,steps,faults,hits,reloads};
+}
+function faultsFor(seq,k,algo){ return simulate(seq,k,algo).faults; }
+function beladyRows(seq){
+  const d=new Set(seq).size, K=Math.min(Math.max(d+1,4),10), rows=[];
+  for(let k=1;k<=K;k++) rows.push({k,fifo:faultsFor(seq,k,'fifo'),lru:faultsFor(seq,k,'lru'),opt:faultsFor(seq,k,'opt')});
+  return rows;
+}
+function parseSeq(str){
+  const parts=str.split(/[\s,;]+/).filter(Boolean);
+  if(!parts.length) return {err:'Escribe al menos una página.'};
+  const out=[];
+  for(const t of parts){ if(!/^\d{1,2}$/.test(t)) return {err:'"'+t+'" no es válido. Usa números del 0 al 99 separados por coma.'}; out.push(+t); }
+  if(out.length>40) return {err:'Máximo 40 peticiones.'};
+  if(new Set(out).size>12) return {err:'Máximo 12 páginas distintas.'};
+  return {seq:out};
+}
+</script>
+
+<script>
+/* ============ INTERFAZ ============ */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const HUES=[240,205,330,38,130,270,10,180,295,70];
+const hue=p=>p<10?HUES[p]:(p*47)%360;
+const chip=(p,cls='')=>'<span class="chip pc '+cls+'" style="--h:'+hue(p)+'">P'+p+'</span>';
+const PRESETS=[
+  {name:'Ejemplo del material',seq:[1,2,3,1,4,2,1],n:3},
+  {name:'Belady',seq:[1,2,3,4,1,2,5,1,2,3,4,5],n:3},
+  {name:'Una página muy usada',seq:[1,2,3,1,4,1,5,1,2,1,3,1],n:3},
+  {name:'Al azar',random:true}
+];
+const S={seq:[1,2,3,1,4,2,1],n:3,pos:5,speed:1,playing:false,busy:false,token:0,runK:-1,predict:false,view:'queue',
+  tab:'simulador',score:{ok:0,total:0},awaiting:null,cmpSel:null,belPair:null};
+let sims={}, pages=[];
+
+function recompute(){
+  sims={fifo:simulate(S.seq,S.n,'fifo'),lru:simulate(S.seq,S.n,'lru'),opt:simulate(S.seq,S.n,'opt')};
+  pages=[...new Set(S.seq)].sort((a,b)=>a-b);
+  S.cmpSel=null; S.belPair=null;
+}
+const F=()=>sims.fifo;
+const wait=ms=>new Promise(r=>setTimeout(r,reduce?0:ms/S.speed));
+
+/* ---------- configuración ---------- */
+function renderConfig(){
+  $('#seqInput').value=S.seq.join(', '); $('#seqErr').textContent=''; $('#seqInput').removeAttribute('aria-invalid');
+  $('#nOut').textContent=S.n; $('#nMinus').disabled=S.n<=1; $('#nPlus').disabled=S.n>=8;
+}
+function setConfig(seq,n,pos=0){
+  cancelRun(); S.playing=false;
+  if(seq) S.seq=seq; if(n) S.n=n;
+  recompute(); S.pos=Math.min(pos,S.seq.length); S.score={ok:0,total:0};
+  renderConfig(); renderAll();
+}
+function initConfig(){
+  $('#presets').innerHTML=PRESETS.map((p,i)=>'<button class="preset" data-preset="'+i+'">'+p.name+'</button>').join('');
+  $('#palette').innerHTML=[1,2,3,4,5,6,7,8,9].map(p=>'<button data-add="'+p+'" style="--c:hsl('+hue(p)+' 88% 64%)" aria-label="Agregar P'+p+'">'+p+'</button>').join('')+'<button data-add="del" style="background:var(--panel2);color:var(--fg);border:1px solid var(--line)" aria-label="Quitar la última petición">⌫</button>';
+  $('#applySeq').onclick=applyInput;
+  $('#seqInput').addEventListener('keydown',e=>{ if(e.key==='Enter') applyInput(); });
+  $('#nMinus').onclick=()=>setConfig(null,Math.max(1,S.n-1));
+  $('#nPlus').onclick=()=>setConfig(null,Math.min(8,S.n+1));
+  $('#presets').onclick=e=>{
+    const b=e.target.closest('[data-preset]'); if(!b) return; const p=PRESETS[+b.dataset.preset];
+    if(p.random){ const len=14,seq=[]; for(let i=0;i<len;i++) seq.push(1+Math.floor(Math.random()*6)); setConfig(seq,null); }
+    else setConfig(p.seq,p.n);
+  };
+  $('#palette').onclick=e=>{
+    const b=e.target.closest('[data-add]'); if(!b) return;
+    const seq=S.seq.slice();
+    if(b.dataset.add==='del'){ if(seq.length>1) seq.pop(); }
+    else{ if(seq.length>=40){ showErr('Máximo 40 peticiones.'); return; } if(!seq.includes(+b.dataset.add)&&new Set(seq).size>=12){ showErr('Máximo 12 páginas distintas.'); return; } seq.push(+b.dataset.add); }
+    setConfig(seq,null,Math.min(S.pos,seq.length));
+  };
+}
+function showErr(m){ $('#seqErr').textContent=m; }
+function applyInput(){
+  const r=parseSeq($('#seqInput').value);
+  if(r.err){ showErr(r.err); $('#seqInput').setAttribute('aria-invalid','true'); return; }
+  setConfig(r.seq,null,0);
+}
+
+/* ---------- pestañas ---------- */
+function setTab(t){
+  if(!['simulador','comparar','belady'].includes(t)) t='simulador';
+  S.tab=t;
+  $$('.tab').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));
+  ['simulador','comparar','belady'].forEach(n=>$('#tab-'+n).hidden=(n!==t));
+  if(t!=='simulador'){ cancelRun(); S.playing=false; updateTransport(); }
+  if(location.hash!=='#'+t) history.replaceState(null,'','#'+t);
+  renderAll();
+}
+function renderAll(){
+  if(S.tab==='simulador') renderSim(); else if(S.tab==='comparar') renderCompare(); else renderBelady();
+}
+
+/* ---------- tabla de traza (reutilizable) ---------- */
+function traceHTML(sim,o={}){
+  const upto=o.upto??sim.steps.length, cur=o.cur??-1, sel=o.sel??-1, mode=o.mode||'slot', n=sim.n;
+  const cc=j=>(j>=upto?'future ':'')+(j===cur?'cur ':'')+(j===sel?'sel ':'');
+  let h='<table class="trace'+(o.click?' click':'')+'"><tbody><tr><th>Pide</th>';
+  sim.steps.forEach((st,j)=>{ h+='<td class="'+cc(j)+'" data-j="'+j+'"><span class="rq pc" style="--h:'+hue(st.p)+'">'+st.p+'</span></td>'; });
+  h+='</tr>';
+  for(let r=0;r<n;r++){
+    const label=mode==='queue'?((r+1)+'º'+(r===0?' · sale':'')):('Marco '+r);
+    h+='<tr><th>'+label+'</th>';
+    sim.steps.forEach((st,j)=>{
+      if(j>=upto){ h+='<td class="empty future" data-j="'+j+'"></td>'; return; }
+      let p,isNew=false,isHit=false;
+      if(mode==='queue'){
+        p=st.queue[r]??null;
+        isNew=!st.hit && p!==null && r===st.queue.length-1;
+        isHit=st.hit && p===st.p;
+      } else {
+        p=st.frames[r];
+        isNew=!st.hit && st.slot===r; isHit=st.hit && st.slot===r;
+      }
+      if(p===null){ h+='<td class="empty '+cc(j)+'" data-j="'+j+'"></td>'; return; }
+      h+='<td class="'+cc(j)+'" data-j="'+j+'"><span class="tc pc'+(isNew?' new':'')+(isHit?' hitc':'')+'" style="--h:'+hue(p)+'">'+p+'</span></td>';
+    });
+    h+='</tr>';
+  }
+  h+='<tr><th>Resultado</th>'+sim.steps.map((st,j)=>j>=upto?'<td class="future" data-j="'+j+'"></td>':'<td class="res '+(st.hit?'ok':'ko')+' '+cc(j)+'" data-j="'+j+'" title="'+(st.hit?'Acierto':'Fallo')+'">'+(st.hit?'✓':'✗')+'</td>').join('')+'</tr>';
+  h+='<tr><th>Sale</th>'+sim.steps.map((st,j)=>j>=upto?'<td class="future" data-j="'+j+'"></td>':'<td class="ev '+cc(j)+'" data-j="'+j+'">'+(st.evicted!==null?'−P'+st.evicted:'')+'</td>').join('')+'</tr>';
+  return h+'</tbody></table>';
+}
+
+/* ---------- simulador ---------- */
+function stateAt(pos){ return pos>0?F().steps[pos-1]:null; }
+function renderSim(){
+  const pos=S.pos, st=stateAt(pos), N=S.seq.length;
+  // rail
+  $('#rail').innerHTML=S.seq.map((p,i)=>'<button class="rchip'+(i<pos?' done '+(F().steps[i].hit?'h':'f'):'')+(i===pos-1?' cur':'')+'" data-i="'+i+'" aria-label="Petición '+(i+1)+': P'+p+'">'+chip(p)+'<span class="dot"></span><span class="ix">'+(i+1)+'</span></button>').join('');
+  renderStage(st);
+  renderStats(st);
+  renderExplain(st);
+  $('#traceSim').innerHTML=traceHTML(F(),{upto:pos,cur:pos-1,mode:S.view});
+  const cur=$('#traceSim td.cur'); if(cur&&cur.scrollIntoView) { const w=$('#traceSim'); w.scrollLeft=Math.max(0,cur.offsetLeft-w.clientWidth+80); }
+  $('#vQueue').setAttribute('aria-pressed',S.view==='queue'); $('#vSlot').setAttribute('aria-pressed',S.view==='slot');
+  updateTransport();
+}
+function cpuHTML(p,status,kind){
+  const pill=status?'<span class="pill '+kind+'">'+status+'</span>':'';
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>'+
+    '<div class="who"><span class="lbl">CPU pide</span>'+(p===null?'<span class="mono" style="color:var(--muted)">esperando…</span>':chip(p,'big'))+'</div>'+pill;
+}
+function renderStage(st){
+  const n=S.n, frames=st?st.frames:Array(n).fill(null), full=st?st.queue.length===n:false;
+  // CPU
+  if(!st) $('#cpu').innerHTML=cpuHTML(null,'Sin peticiones aún','idle');
+  else if(st.hit) $('#cpu').innerHTML=cpuHTML(st.p,'Acierto','hit');
+  else $('#cpu').innerHTML=cpuHTML(st.p,'Fallo de página','fault');
+  $('#ramInfo').textContent=n+(n===1?' marco':' marcos');
+  // frames
+  $('#frames').innerHTML=frames.map((p,s)=>{
+    const rank=st&&p!==null?st.qslots.indexOf(s)+1:0;
+    const isNew=st&&!st.hit&&st.slot===s, isHit=st&&st.hit&&st.slot===s;
+    const tag=rank===1?'<div class="tag'+(full?' out':'')+'">'+(full?'sale primero':'más antigua')+'</div>':'';
+    return '<div class="frame pc '+(p===null?'empty':'')+(isNew?' new':'')+(isHit?' hit':'')+'" style="'+(p!==null?'--h:'+hue(p):'')+'" data-slot="'+s+'">'+
+      '<div class="f-top"><span>MARCO '+s+'</span>'+(rank?'<span class="rank" title="Lugar en la cola (1 = la más antigua)">#'+rank+'</span>':'')+'</div>'+
+      '<div class="f-body">'+(p!==null?chip(p,'big'):'<span class="free">libre</span>')+'</div>'+
+      '<div class="f-foot">'+(p!==null?'entró · paso '+(st.loadT[s]+1):'')+'</div>'+tag+'</div>';
+  }).join('');
+  // cola
+  const q=st?st.queue:[], qt=st?st.qtimes:[];
+  $('#queue').innerHTML='<span class="qe out">← SALE</span>'+(q.length?q.map((p,i)=>'<span class="qi">'+chip(p)+'paso '+(qt[i]+1)+'</span>').join(''):'<span class="mono" style="color:var(--muted);font-size:11px">cola vacía</span>')+'<span class="qe in">ENTRA →</span>';
+  // SSD
+  $('#ssd').innerHTML=pages.map(p=>'<div class="ssd-card'+(frames.includes(p)?' copied':'')+'" data-p="'+p+'">'+chip(p)+(frames.includes(p)?'en RAM ✓':'solo SSD')+'</div>').join('');
+  // tabla de páginas
+  $('#pt tbody').innerHTML=pages.map(p=>{ const s=frames.indexOf(p); return '<tr data-p="'+p+'"><td>'+chip(p)+'</td><td class="'+(s>=0?'v1':'v0')+'">'+(s>=0?1:0)+'</td><td>'+(s>=0?'Marco '+s:'SSD')+'</td></tr>'; }).join('');
+}
+function renderStats(st){
+  const f=st?st.faults:0,h=st?st.hits:0,t=f+h,N=S.seq.length;
+  const rate=t?Math.round(f/t*100):0;
+  $('#stats').innerHTML=
+    '<div class="stat f"><b>'+f+'</b><span>Fallos de página</span></div>'+
+    '<div class="stat h"><b>'+h+'</b><span>Aciertos</span></div>'+
+    '<div class="stat"><b>'+rate+'%</b><span>Tasa de fallos</span></div>'+
+    '<div class="stat"><b>'+(st?st.reloads:0)+'</b><span>Recargas de páginas que ya habían salido</span></div>'+
+    '<div style="grid-column:1/-1"><div class="ex-step">Avance: '+t+' de '+N+' peticiones'+(S.score.total?' · Predicción: '+S.score.ok+'/'+S.score.total:'')+'</div>'+
+    '<div class="bar"><i style="width:'+(f/N*100)+'%;background:var(--fault)"></i><i style="width:'+(h/N*100)+'%;background:var(--hit)"></i></div></div>';
+}
+const GLOS='<details class="gl"><summary>Glosario rápido</summary><dl>'+
+  '<dt>Página</dt><dd>Un pedazo de tamaño fijo del programa. Vive en el SSD.</dd>'+
+  '<dt>Marco</dt><dd>Un espacio de la RAM donde cabe exactamente una página.</dd>'+
+  '<dt>Fallo de página</dt><dd>Se pide una página que no está en la RAM. No es un error: hay que traerla del SSD.</dd>'+
+  '<dt>Acierto</dt><dd>La página ya estaba en la RAM. No cambia nada.</dd>'+
+  '<dt>FIFO</dt><dd>First In, First Out. Cuando la RAM está llena sale la página que lleva más tiempo ahí.</dd></dl></details>';
+function renderExplain(st){
+  const N=S.seq.length, el=$('#explain');
+  if(!st){
+    el.innerHTML='<div class="ex-head"><span class="pill idle">Listo</span><span class="ex-step">Paso 0 de '+N+'</span></div>'+
+      '<p class="ex-main">La CPU pedirá las páginas <b class="mono">'+S.seq.join(', ')+'</b> y la RAM tiene <b>'+S.n+'</b> '+(S.n===1?'marco':'marcos')+'. Pulsa <b>Reproducir</b> o <b>Siguiente</b> para ver qué pasa en cada petición.</p>'+
+      '<div class="ex-insight">Regla de FIFO: cuando todo está lleno, sale la página que lleva más tiempo en la RAM, la use o no.</div>'+GLOS;
+    return;
+  }
+  const k=st.i+1; let kind,label,main,ins='';
+  if(st.hit){
+    kind='hit';label='Acierto';
+    main='<b>P'+st.p+'</b> ya estaba en el marco '+st.slot+'. No hay fallo y el orden de la cola no cambia.';
+    if(st.queue[0]===st.p && st.queue.length===S.n) ins='<div class="ex-insight warn">Se usó, pero sigue siendo la <b>más antigua</b>. FIFO no la mueve al final, así que será la próxima en salir.</div>';
+  } else if(!st.full){
+    kind='fault';label='Fallo · hay espacio';
+    main='<b>P'+st.p+'</b> no estaba en la RAM. Se copia del SSD al marco libre '+st.slot+' y se anota al final de la cola.';
+  } else {
+    kind='evict';label='Fallo · RAM llena';
+    main='<b>P'+st.p+'</b> no estaba y no hay marcos libres. La más antigua es <b>P'+st.evicted+'</b> (entró en el paso '+(st.evLoad+1)+'). Sale <b>P'+st.evicted+'</b>, entra <b>P'+st.p+'</b> en su marco y va al final de la cola.';
+    if(st.evHits>0) ins+='<div class="ex-insight warn"><b>P'+st.evicted+'</b> se usó '+st.evHits+(st.evHits===1?' vez':' veces')+' desde que entró y sale igual. FIFO mira cuándo entró, no cuándo se usó.</div>';
+    if(st.lruAlt!==st.evicted) ins+='<div class="ex-insight">Con estos mismos marcos, LRU habría sacado <b>P'+st.lruAlt+'</b>, la que lleva más tiempo sin usarse.</div>';
+  }
+  if(st.reload && !st.hit) ins+='<div class="ex-insight warn"><b>P'+st.p+'</b> ya había estado en la RAM y salió antes. Volver a traerla cuesta otro acceso al SSD.</div>';
+  if(k===N) ins+='<div class="ex-insight good">Fin: <b>'+st.faults+' fallos</b> y <b>'+st.hits+' aciertos</b> ('+Math.round(st.faults/N*100)+'% de fallos). Prueba otro número de marcos.</div>';
+  el.innerHTML='<div class="ex-head"><span class="pill '+kind+'">'+label+'</span><span class="ex-step">Paso '+k+' de '+N+'</span></div><p class="ex-main">'+main+'</p>'+ins+GLOS;
+}
+
+/* ---------- animación ---------- */
+function fly(fromEl,toEl,p,ms){
+  return new Promise(res=>{
+    if(reduce||!fromEl||!toEl){res();return;}
+    const a=fromEl.getBoundingClientRect(), b=toEl.getBoundingClientRect();
+    const el=document.createElement('span'); el.className='chip big pc fly'; el.style.setProperty('--h',hue(p)); el.textContent='P'+p;
+    const cx=a.left+a.width/2, cy=a.top+a.height/2;
+    el.style.left=(cx-24)+'px'; el.style.top=(cy-24)+'px'; document.body.appendChild(el);
+    const dx=b.left+b.width/2-cx, dy=b.top+b.height/2-cy;
+    const an=el.animate([{transform:'translate(0,0) scale(.8)'},{transform:'translate('+dx/2+'px,'+(dy/2-34)+'px) scale(1.2)',offset:.5},{transform:'translate('+dx+'px,'+dy+'px) scale(1)'}],
+      {duration:ms/S.speed,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'});
+    const done=()=>{el.remove();res();}; an.onfinish=done; an.oncancel=done;
+  });
+}
+function cancelRun(){
+  S.token++; S.busy=false;
+  if(S.awaiting){ const r=S.awaiting.resolve; S.awaiting=null; r(null); }
+  $$('.fly').forEach(e=>e.remove());
+}
+const frameEl=s=>$('.frame[data-slot="'+s+'"]');
+async function runStep(k){
+  if(S.busy||k>=F().steps.length) return false;
+  S.busy=true; S.runK=k; const my=++S.token, alive=()=>my===S.token, st=F().steps[k];
+  try{
+    // 1. la CPU pide la página
+    $$('.rchip').forEach(e=>e.classList.toggle('cur',+e.dataset.i===k));
+    $('#cpu').innerHTML=cpuHTML(st.p,'Consultando tabla…','idle');
+    $('#explain').innerHTML='<div class="ex-head"><span class="pill idle">Paso '+(k+1)+'</span><span class="ex-step">de '+S.seq.length+'</span></div><p class="ex-main">La CPU pide <b>P'+st.p+'</b>. El sistema consulta la tabla de páginas.</p>';
+    const row=$('#pt tr[data-p="'+st.p+'"]'); if(row) row.classList.add('lookup');
+    await wait(750); if(!alive()) return false;
+    // 2. resultado de la consulta
+    if(st.hit){
+      const fr=frameEl(st.slot); if(fr) fr.classList.add('hit');
+      $('#cpu').innerHTML=cpuHTML(st.p,'Acierto','hit');
+      await wait(750); if(!alive()) return false;
+    } else {
+      if(row){ row.classList.remove('lookup'); row.classList.add('miss'); }
+      $('#cpu').innerHTML=cpuHTML(st.p,'Fallo de página','fault');
+      await wait(750); if(!alive()) return false;
+      const card=(p)=>$('.ssd-card[data-p="'+p+'"]');
+      if(st.full){
+        if(S.predict){
+          const ok=await askPrediction(st); if(!alive()) return false;
+          if(ok===null) return false;
+        }
+        const fr=frameEl(st.evSlot); if(fr){ fr.classList.remove('pick','wrong'); fr.classList.add('victim'); }
+        await wait(800); if(!alive()) return false;
+        const body=fr&&fr.querySelector('.f-body'), chipEl=body&&body.querySelector('.chip');
+        if(chipEl) chipEl.style.visibility='hidden';
+        await fly(body,card(st.evicted),st.evicted,700); if(!alive()) return false;
+      }
+      const target=frameEl(st.slot); if(target&&!st.full) target.classList.add('new');
+      const src=card(st.p); if(src) src.classList.add('src');
+      await fly(src,target&&target.querySelector('.f-body'),st.p,800); if(!alive()) return false;
+    }
+    S.pos=k+1; renderSim();
+    return true;
+  } finally { if(my===S.token) S.busy=false; }
+}
+function askPrediction(st){
+  return new Promise(resolve=>{
+    const cands=st.qslots.map(s=>frameEl(s)); cands.forEach(f=>f&&f.classList.add('pick'));
+    $('#explain').innerHTML='<div class="ex-head"><span class="pill evict">Tu turno</span><span class="ex-step">Modo predicción</span></div>'+
+      '<p class="ex-main">La RAM está llena y <b>P'+st.p+'</b> no está. <b>¿Qué página sale según FIFO?</b> Toca su marco.</p>';
+    S.awaiting={st,resolve:v=>{ cands.forEach(f=>f&&f.classList.remove('pick')); resolve(v); }};
+  });
+}
+function handleFramePick(e){
+  const fr=e.target.closest('.frame.pick'); if(!fr||!S.awaiting) return;
+  const {st,resolve}=S.awaiting, s=+fr.dataset.slot, chosen=st.frames_before?null:null;
+  const prev=F().steps[st.i-1], chosenPage=prev.frames[s], ok=(s===st.evSlot);
+  S.score.total++; if(ok) S.score.ok++;
+  S.awaiting=null;
+  const fb=ok
+    ? '<div class="ex-head"><span class="pill hit">Correcto</span></div><p class="ex-main"><b>P'+st.evicted+'</b> entró primero (paso '+(st.evLoad+1)+'), así que FIFO la saca.</p>'
+    : '<div class="ex-head"><span class="pill evict">No es esa</span></div><p class="ex-main">Elegiste <b>P'+chosenPage+'</b>, que entró en el paso '+(prev.loadT[s]+1)+'. FIFO saca <b>P'+st.evicted+'</b>: entró en el paso '+(st.evLoad+1)+', antes que las demás.</p>';
+  $('#explain').innerHTML=fb;
+  if(!ok){ fr.classList.add('wrong'); }
+  renderStats(prev);
+  setTimeout(()=>resolve(true),reduce?0:1400/S.speed);
+  $$('.frame.pick').forEach(f=>f.classList.remove('pick'));
+}
+
+/* ---------- controles ---------- */
+function updateTransport(){
+  const N=S.seq.length;
+  $('#playTxt').textContent=S.playing?'Pausa':(S.pos>=N?'Repetir':'Reproducir');
+  $('#playIcon').innerHTML=S.playing?'<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>':'<path d="M7 4l13 8-13 8z"/>';
+  $('#bPrev').disabled=S.pos<=0 && !S.busy; $('#bNext').disabled=S.pos>=N && !S.busy;
+}
+function jump(pos){ cancelRun(); S.playing=false; S.pos=Math.max(0,Math.min(S.seq.length,pos)); renderSim(); }
+async function play(){
+  if(S.playing){ S.playing=false; updateTransport(); return; }
+  if(S.pos>=S.seq.length){ S.pos=0; S.score={ok:0,total:0}; renderSim(); }
+  S.playing=true; updateTransport();
+  while(S.playing && S.pos<S.seq.length){
+    const ok=await runStep(S.pos); if(!ok) break;
+    if(!S.playing) break; await wait(350);
+  }
+  S.playing=false; updateTransport();
+}
+async function next(){
+  S.playing=false;
+  if(S.busy){ const k=S.runK; cancelRun(); S.pos=k+1; renderSim(); return; }
+  await runStep(S.pos); updateTransport();
+}
+function prev(){ jump(S.pos-1); }
+function initSim(){
+  $('#bPlay').onclick=play; $('#bNext').onclick=next; $('#bPrev').onclick=prev; $('#bReset').onclick=()=>{ S.score={ok:0,total:0}; jump(0); };
+  $('#speed').oninput=e=>{ S.speed=+e.target.value; $('#speedOut').textContent=S.speed+'×'; };
+  $('#predict').onchange=e=>{ S.predict=e.target.checked; };
+  $('#rail').onclick=e=>{ const b=e.target.closest('[data-i]'); if(b) jump(+b.dataset.i+1); };
+  $('#frames').onclick=handleFramePick;
+  $('#vQueue').onclick=()=>{S.view='queue';renderSim();}; $('#vSlot').onclick=()=>{S.view='slot';renderSim();};
+  document.addEventListener('keydown',e=>{
+    if(S.tab!=='simulador'||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)||e.target.closest('button')&&e.key===' ') return;
+    if(e.key===' '){e.preventDefault();play();} else if(e.key==='ArrowRight'){next();} else if(e.key==='ArrowLeft'){prev();} else if(e.key==='r'||e.key==='R'){jump(0);}
+  });
+}
+
+/* ---------- comparador ---------- */
+const ALGOS=[
+  {id:'fifo',name:'FIFO',color:'var(--fifo)',rule:'Sale la que llegó primero.'},
+  {id:'lru',name:'LRU',color:'var(--lru)',rule:'Sale la que lleva más tiempo sin usarse.'},
+  {id:'opt',name:'Óptimo',color:'var(--opt)',rule:'Sale la que tardará más en volver a pedirse. Solo teórico: necesita conocer el futuro.'}
+];
+function defaultSel(){
+  const n=S.seq.length;
+  for(let j=0;j<n;j++){
+    const ev=ALGOS.map(a=>sims[a.id].steps[j].evicted);
+    if(ev.some(e=>e!==null) && new Set(ev).size>1) return j;
+  }
+  for(let j=0;j<n;j++) if(sims.fifo.steps[j].evicted!==null) return j;
+  return 0;
+}
+function decText(a,st){
+  if(st.hit) return 'Acierto: <b>P'+st.p+'</b> ya estaba en la RAM.';
+  if(st.evicted===null) return 'Fallo: hay un marco libre y entra <b>P'+st.p+'</b>.';
+  let why;
+  if(a==='fifo') why='entró en el paso '+(st.evLoad+1)+', la más antigua';
+  else if(a==='lru') why='su último uso fue en el paso '+(st.evUse+1)+', hace más que las demás';
+  else why=st.evNext<0?'no se vuelve a pedir':'se vuelve a pedir hasta el paso '+(st.evNext+1)+', la más lejana';
+  return 'Fallo: sale <b>P'+st.evicted+'</b> y entra P'+st.p+'. Razón: '+why+'.';
+}
+function renderCompare(){
+  if(S.cmpSel===null) S.cmpSel=defaultSel();
+  const N=S.seq.length, j=S.cmpSel;
+  $('#cmpInfo').textContent='Peticiones: '+S.seq.join(', ')+' · '+S.n+(S.n===1?' marco':' marcos');
+  const mx=Math.max(1,...ALGOS.map(a=>sims[a.id].faults));
+  $('#sumBars').innerHTML=ALGOS.map(a=>'<div class="sb"><span class="algo"><i style="background:'+a.color+'"></i>'+a.name+'</span><div class="track"><i style="width:'+(sims[a.id].faults/N*100)+'%;background:'+a.color+'"></i></div><b>'+sims[a.id].faults+'</b></div>').join('');
+  const df=sims.fifo.faults-sims.opt.faults, dl=sims.lru.faults-sims.opt.faults;
+  $('#cmpMsg').innerHTML='El Óptimo marca el mínimo posible: <b>'+sims.opt.faults+' fallos</b>. FIFO tuvo '+(df===0?'los mismos':'<b>'+df+' más</b>')+' y LRU '+(dl===0?'los mismos':'<b>'+dl+' más</b>')+'.'+(sims.fifo.faults<sims.lru.faults?' En esta secuencia FIFO superó a LRU, algo que puede pasar pero no es lo habitual.':'');
+  $('#cmpCards').innerHTML=ALGOS.map(a=>{ const s=sims[a.id];
+    return '<section class="card pad"><div class="cmp-head"><div><div class="algo"><i style="background:'+a.color+'"></i>'+a.name+'</div><div class="rule">'+a.rule+'</div></div>'+
+      '<div class="big-n" style="color:'+a.color+'">'+s.faults+'<small>fallos · '+s.hits+' aciertos</small></div></div>'+
+      '<div class="trace-wrap" data-algo="'+a.id+'">'+traceHTML(s,{sel:j,click:true})+'</div></section>'; }).join('');
+  $('#decStep').textContent=(j+1)+' · pide P'+S.seq[j];
+  $('#dec').innerHTML=ALGOS.map(a=>'<div class="dec-row"><span class="algo"><i style="background:'+a.color+'"></i>'+a.name+'</span><span>'+decText(a.id,sims[a.id].steps[j])+'</span></div>').join('');
+}
+function initCompare(){
+  $('#cmpCards').onclick=e=>{ const td=e.target.closest('td[data-j]'); if(!td) return; S.cmpSel=+td.dataset.j; renderCompare(); };
+}
+
+/* ---------- Belady ---------- */
+function beladyPair(rows){
+  if(S.belPair) return S.belPair;
+  for(let i=1;i<rows.length;i++) if(rows[i].fifo>rows[i-1].fifo){ S.belPair=[rows[i-1].k,rows[i].k]; return S.belPair; }
+  S.belPair=[Math.min(2,rows.length-1),Math.min(3,rows.length)]; if(S.belPair[0]===S.belPair[1]) S.belPair=[1,2]; return S.belPair;
+}
+function renderBelady(){
+  const rows=beladyRows(S.seq), pair=beladyPair(rows), anoms=[];
+  for(let i=1;i<rows.length;i++) if(rows[i].fifo>rows[i-1].fifo) anoms.push(i);
+  // veredicto
+  const v=$('#belVerdict');
+  if(anoms.length){
+    const i=anoms[0]; v.className='verdict bad';
+    v.innerHTML='<b class="n" style="color:var(--evict)">Anomalía de Belady</b><br>Con <b>'+rows[i-1].k+' marcos</b> FIFO tiene <b>'+rows[i-1].fifo+' fallos</b>; con <b>'+rows[i].k+' marcos</b> tiene <b>'+rows[i].fifo+'</b>. Más RAM, más fallos.'+(anoms.length>1?' Se repite en '+anoms.length+' tamaños.':'')+' LRU y Óptimo no suben en ningún tamaño.';
+  } else {
+    v.className='verdict ok';
+    v.innerHTML='<b class="n" style="color:var(--hit)">Sin anomalía</b><br>Con esta secuencia, más marcos nunca produce más fallos en FIFO. Eso no garantiza que no pueda pasar: depende de la secuencia. Prueba la secuencia de Belady.';
+  }
+  $('#belTbl').innerHTML='<tr><th>Marcos</th><th style="color:var(--fifo)">FIFO</th><th style="color:var(--lru)">LRU</th><th style="color:var(--opt)">Óptimo</th></tr>'+
+    rows.map((r,i)=>'<tr class="'+(anoms.includes(i)?'anom':'')+(r.k===pair[1]?' selr':'')+'"><td>'+r.k+'</td><td>'+r.fifo+'</td><td>'+r.lru+'</td><td>'+r.opt+'</td></tr>').join('');
+  // selects
+  const opts=rows.map(r=>'<option value="'+r.k+'">'+r.k+' '+(r.k===1?'marco':'marcos')+'</option>').join('');
+  $('#belA').innerHTML=opts; $('#belB').innerHTML=opts; $('#belA').value=pair[0]; $('#belB').value=pair[1];
+  // pares de trazas
+  const a=simulate(S.seq,pair[0],'fifo'), b=simulate(S.seq,pair[1],'fifo');
+  const bad=b.faults>a.faults;
+  $('#belPair').innerHTML=[a,b].map((s,idx)=>'<div><div class="cmp-head"><div class="algo"><i style="background:var(--fifo)"></i>FIFO con '+s.n+(s.n===1?' marco':' marcos')+'</div><div class="big-n" style="color:'+(idx===1&&bad?'var(--evict)':'var(--fifo)')+'">'+s.faults+'<small>fallos</small></div></div><div class="trace-wrap">'+traceHTML(s,{mode:'slot'})+'</div></div>').join('');
+  drawChart(rows,anoms,pair);
+}
+function drawChart(rows,anoms,pair){
+  const box=$('#chart'), W=Math.max(280,box.clientWidth||520), H=270, m={l:38,r:16,t:16,b:44}, K=rows.length;
+  const maxV=Math.max(...rows.flatMap(r=>[r.fifo,r.lru,r.opt])), step=Math.max(1,Math.ceil(maxV/6)), top=Math.ceil((maxV+0.5)/step)*step;
+  const x=k=>m.l+(k-1)*(W-m.l-m.r)/(K-1), y=v=>H-m.b-v*(H-m.t-m.b)/top;
+  let g='';
+  for(let v=0;v<=top;v+=step) g+='<line class="gridl" x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(v)+'" y2="'+y(v)+'"/><text class="ax" x="'+(m.l-8)+'" y="'+(y(v)+4)+'" text-anchor="end">'+v+'</text>';
+  rows.forEach(r=>{ g+='<text class="ax" x="'+x(r.k)+'" y="'+(H-m.b+18)+'" text-anchor="middle">'+r.k+'</text>'; });
+  g+='<text class="ax" x="'+((m.l+W-m.r)/2)+'" y="'+(H-6)+'" text-anchor="middle">Marcos en la RAM</text>';
+  g+='<text class="ax" transform="translate(11 '+((m.t+H-m.b)/2)+') rotate(-90)" text-anchor="middle">Fallos de página</text>';
+  // banda seleccionada
+  const x1=x(pair[0]), x2=x(pair[1]);
+  g+='<rect x="'+(x1-14)+'" y="'+m.t+'" width="'+(x2-x1+28)+'" height="'+(H-m.t-m.b)+'" rx="10" fill="var(--accent2)" opacity=".1"/>';
+  const path=key=>rows.map((r,i)=>(i?'L':'M')+x(r.k).toFixed(1)+' '+y(r[key]).toFixed(1)).join(' ');
+  g+='<path d="'+path('opt')+'" fill="none" stroke="var(--opt)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>';
+  g+='<path d="'+path('lru')+'" fill="none" stroke="var(--lru)" stroke-width="2.4" stroke-linejoin="round"/>';
+  g+='<path d="'+path('fifo')+'" fill="none" stroke="var(--fifo)" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>';
+  rows.forEach((r,i)=>{
+    const an=anoms.includes(i);
+    if(an) g+='<circle cx="'+x(r.k)+'" cy="'+y(r.fifo)+'" r="13" fill="none" stroke="var(--evict)" stroke-width="2.5"><animate attributeName="r" values="11;16;11" dur="1.6s" repeatCount="indefinite"/></circle>';
+    g+='<circle cx="'+x(r.k)+'" cy="'+y(r.fifo)+'" r="5" fill="'+(an?'var(--evict)':'var(--fifo)')+'" stroke="var(--panel)" stroke-width="2"/>';
+    g+='<text class="ax" style="fill:var(--fg);font-weight:700" x="'+x(r.k)+'" y="'+(y(r.fifo)-(an?20:11))+'" text-anchor="middle">'+r.fifo+'</text>';
+  });
+  rows.forEach(r=>{ g+='<rect data-k="'+r.k+'" x="'+(x(r.k)-18)+'" y="'+m.t+'" width="36" height="'+(H-m.t)+'" fill="transparent" style="cursor:pointer"><title>'+r.k+' marcos: FIFO '+r.fifo+', LRU '+r.lru+', Óptimo '+r.opt+'</title></rect>'; });
+  box.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" height="'+H+'" role="img" aria-label="Gráfica de fallos de página según el número de marcos">'+g+'</svg>';
+}
+function findAnomaly(){
+  const btn=$('#belFind'); let found=null;
+  for(let t=0;t<60000&&!found;t++){
+    // Las anomalías aparecen con recorridos casi secuenciales; con peticiones uniformes son rarísimas.
+    const len=12+Math.floor(Math.random()*4), mp=5+Math.floor(Math.random()*2), seq=[];
+    let p=1+Math.floor(Math.random()*mp);
+    for(let i=0;i<len;i++){ p=Math.random()<.55?p%mp+1:1+Math.floor(Math.random()*mp); seq.push(p); }
+    const d=new Set(seq).size; if(d<4) continue;
+    let prev=faultsFor(seq,1,'fifo');
+    for(let k=2;k<=d;k++){ const f=faultsFor(seq,k,'fifo'); if(f>prev){found=seq;break;} prev=f; }
+  }
+  if(found){ setConfig(found,null,0); } else { btn.textContent='No encontré una, intenta otra vez'; setTimeout(()=>btn.textContent='Buscar una anomalía al azar',2000); }
+}
+function initBelady(){
+  $('#belLoad').onclick=()=>setConfig([1,2,3,4,1,2,5,1,2,3,4,5],null,0);
+  $('#belFind').onclick=findAnomaly;
+  const chg=()=>{ let a=+$('#belA').value,b=+$('#belB').value; if(a===b) b=a+1; S.belPair=[Math.min(a,b),Math.max(a,b)]; renderBelady(); };
+  $('#belA').onchange=chg; $('#belB').onchange=chg;
+  $('#belGo').onclick=()=>{ const b=S.belPair?S.belPair[1]:S.n; S.n=b; setConfig(null,b,0); setTab('simulador'); };
+  $('#chart').onclick=e=>{ const r=e.target.closest('[data-k]'); if(!r) return; const k=+r.dataset.k; S.belPair=k>1?[k-1,k]:[1,2]; renderBelady(); };
+  new ResizeObserver(()=>{ if(S.tab==='belady') renderBelady(); }).observe($('#chart'));
+}
+
+/* ---------- arranque ---------- */
+$$('.tab').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+addEventListener('hashchange',()=>setTab(location.hash.slice(1)));
+initConfig(); initSim(); initCompare(); initBelady();
+recompute(); renderConfig();
+setTab(location.hash.slice(1)||'simulador');
+</script>
+
+</body></html>
