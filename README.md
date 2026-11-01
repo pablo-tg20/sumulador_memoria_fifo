@@ -1,0 +1,1 @@
+# sumulador_memoria_fifo
