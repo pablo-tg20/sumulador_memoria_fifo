@@ -462,12 +462,13 @@ const HUES=[240,205,330,38,130,270,10,180,295,70];
 const hue=p=>p<10?HUES[p]:(p*47)%360;
 const chip=(p,cls='')=>'<span class="chip pc '+cls+'" style="--h:'+hue(p)+'">P'+p+'</span>';
 const PRESETS=[
-  {name:'Ejemplo del material',seq:[1,2,3,1,4,2,1],n:3},
+  {name:'Simulación FIFO (20 accesos)',seq:[7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1],n:3},
+  {name:'Ejemplo corto',seq:[1,2,3,1,4,2,1],n:3},
   {name:'Belady',seq:[1,2,3,4,1,2,5,1,2,3,4,5],n:3},
   {name:'Una página muy usada',seq:[1,2,3,1,4,1,5,1,2,1,3,1],n:3},
   {name:'Al azar',random:true}
 ];
-const S={seq:[1,2,3,1,4,2,1],n:3,pos:5,speed:1,playing:false,busy:false,token:0,runK:-1,predict:false,view:'queue',
+const S={seq:[7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1],n:3,pos:6,speed:1,playing:false,busy:false,token:0,runK:-1,predict:false,view:'queue',
   tab:'simulador',score:{ok:0,total:0},awaiting:null,cmpSel:null,belPair:null};
 let sims={}, pages=[];
 
