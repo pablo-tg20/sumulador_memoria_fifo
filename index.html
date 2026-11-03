@@ -1,5 +1,5 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
-<title>FIFO Visual</title>
+<title>FIFO Visual por fases</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Nunito:wght@500;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
@@ -116,7 +116,16 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.015em;line-height:1.05}
 .nar-x.good{border-color:var(--hit);background:rgba(16,185,129,.1)}
 
 /* Decisión */
-.flow{display:flex;flex-direction:column;gap:6px;padding:10px}
+.flow-box{padding:10px;display:flex;flex-direction:column;gap:8px}
+#flow{display:flex;flex-direction:column;gap:6px}
+.phase-ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px dashed var(--line);padding-top:8px}
+.btn.phase{flex:1 1 200px;justify-content:space-between;text-align:left;white-space:normal;line-height:1.2;padding:9px 14px}
+.btn.phase[disabled]{background:var(--soft);color:var(--muted);border:2px dashed var(--line);box-shadow:none;opacity:1}
+.btn.phase:not([disabled]){animation:ring 1.4s ease-in-out infinite}
+@keyframes ring{0%,100%{box-shadow:0 5px 14px rgba(99,102,241,.3)}50%{box-shadow:0 0 0 6px rgba(139,92,246,.28)}}
+.toggle.sm{padding:4px 10px;font-size:13px}
+.btn.phase-back{padding:9px 11px}
+.btn.phase{flex:1 1 150px}
 .flow-t{font:800 15px var(--f-display);margin:0 2px 2px}
 .fn{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:center;border:2px solid var(--line);border-radius:13px;padding:6px 10px;background:var(--soft);transition:.25s;opacity:.5}
 .fn.done{opacity:1;background:#fff}
@@ -292,9 +301,9 @@ details.how[open] summary::after{content:"Ocultar"}
   <section class="card pad" aria-label="Controles">
     <div class="transport">
       <button class="btn" id="bReset" aria-label="Reiniciar"><svg viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg>Reiniciar</button>
-      <button class="btn" id="bPrev" aria-label="Paso anterior"><svg viewBox="0 0 24 24"><path d="M15 5l-8 7 8 7z"/></svg>Anterior</button>
+      <button class="btn" id="bPrev" aria-label="Paso o fase anterior"><svg viewBox="0 0 24 24"><path d="M15 5l-8 7 8 7z"/></svg><span id="prevTxt">Anterior</span></button>
       <button class="btn primary" id="bPlay"><svg viewBox="0 0 24 24" id="playIcon"><path d="M7 4l13 8-13 8z"/></svg><span id="playTxt">Reproducir</span></button>
-      <button class="btn" id="bNext" aria-label="Paso siguiente">Siguiente<svg viewBox="0 0 24 24"><path d="M9 5l8 7-8 7z"/></svg></button>
+      <button class="btn" id="bNext" aria-label="Paso siguiente"><span id="nextTxt">Siguiente</span><svg viewBox="0 0 24 24"><path d="M9 5l8 7-8 7z"/></svg></button>
       <span class="grow"></span>
       <div class="stepper" role="group" aria-label="Marcos en la RAM"><b>Marcos</b><button id="nMinus" aria-label="Quitar un marco">−</button><output id="nOut">3</output><button id="nPlus" aria-label="Agregar un marco">+</button></div>
       <label class="toggle"><input type="checkbox" id="predict"> Adivina cuál sale</label>
@@ -336,7 +345,14 @@ details.how[open] summary::after{content:"Ocultar"}
       <div class="nar" id="nar" aria-live="polite"></div>
     </aside>
 
-    <section class="card flow-box flow" id="flow" aria-label="Decisión de FIFO en este paso"></section>
+    <section class="card flow-box" aria-label="Decisión de FIFO en este paso">
+      <div id="flow"></div>
+      <div class="phase-ctl">
+        <button class="btn phase-back" id="bPhasePrev" aria-label="Fase anterior" disabled><svg viewBox="0 0 24 24"><path d="M15 5l-8 7 8 7z"/></svg></button>
+        <button class="btn primary phase" id="bPhase" disabled><span id="phaseTxt"></span><svg viewBox="0 0 24 24"><path d="M9 5l8 7-8 7z"/></svg></button>
+        <label class="toggle sm"><input type="checkbox" id="manual" checked> Ir fase por fase</label>
+      </div>
+    </section>
   </div>
 
   <section class="card pad">
@@ -418,7 +434,7 @@ const PRESETS=[
   {name:'Una página muy usada',seq:[1,2,3,1,4,1,5,1,2,1,3,1],n:3},
   {name:'Al azar',random:true}
 ];
-const S={seq:[7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1],n:3,pos:0,speed:1,playing:false,busy:false,token:0,runK:-1,predict:false,score:{ok:0,total:0},awaiting:null};
+const S={seq:[7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1],n:3,pos:0,speed:1,playing:false,anim:false,hold:false,token:0,predict:false,manual:true,cur:{k:0,i:-1},answered:new Set(),score:{ok:0,total:0},awaiting:null};
 let sim,pages=[];
 const wait=ms=>new Promise(r=>setTimeout(r,reduce?0:ms/S.speed));
 const mw=n=>n===1?'marco':'marcos';
@@ -426,7 +442,7 @@ const mw=n=>n===1?'marco':'marcos';
 function recompute(){ sim=simulate(S.seq,S.n); pages=[...new Set(S.seq)].sort((a,b)=>a-b); }
 function setConfig(seq,n,pos=0){
   cancelRun(); S.playing=false; if(seq) S.seq=seq; if(n) S.n=n;
-  recompute(); S.pos=Math.min(pos,S.seq.length); S.score={ok:0,total:0}; renderConfig(); renderSim();
+  recompute(); S.cur={k:0,i:-1}; S.answered=new Set(); S.score={ok:0,total:0}; renderConfig(); renderCur();
 }
 function renderConfig(){
   $('#seqInput').value=S.seq.join(', '); $('#seqErr').textContent=''; $('#seqInput').removeAttribute('aria-invalid');
@@ -454,19 +470,25 @@ function initConfig(){
 
 /* ---------- render ---------- */
 const stAt=pos=>pos>0?sim.steps[pos-1]:null;
+function renderRail(pos,curIdx){
+  $('#rail').innerHTML=S.seq.map((p,i)=>'<button class="rchip'+(i<pos?' done '+(sim.steps[i].hit?'h':'f'):'')+(i===curIdx?' cur':'')+'" data-i="'+i+'" aria-label="Petición '+(i+1)+': página '+p+'">'+np(p)+'<span class="dot"></span><span class="ix">'+(i+1)+'</span></button>').join('');
+}
+function scrollTrace(){
+  const cur=$('#trace td.cur'),w=$('#trace');
+  if(cur) w.scrollLeft=Math.max(0,cur.offsetLeft-w.clientWidth+90); else w.scrollLeft=0;
+}
 function renderSim(){
   const pos=S.pos,st=stAt(pos);
-  $('#rail').innerHTML=S.seq.map((p,i)=>'<button class="rchip'+(i<pos?' done '+(sim.steps[i].hit?'h':'f'):'')+(i===pos-1?' cur':'')+'" data-i="'+i+'" aria-label="Petición '+(i+1)+': página '+p+'">'+np(p)+'<span class="dot"></span><span class="ix">'+(i+1)+'</span></button>').join('');
-  renderStage(st); $('#flow').innerHTML=flowHTML(st,5); renderStats(st); renderNarrator(st);
-  $('#trace').innerHTML=traceHTML(pos); const cur=$('#trace td.cur'); if(cur){const w=$('#trace');w.scrollLeft=Math.max(0,cur.offsetLeft-w.clientWidth+90);} else $('#trace').scrollLeft=0;
+  renderRail(pos,pos-1); renderStage(st); $('#flow').innerHTML=flowHTML(st,5); renderStats(st,pos); renderNarrator(st);
+  $('#trace').innerHTML=traceHTML(pos); scrollTrace();
   updateTransport();
 }
 function cpuHTML(p,say){
   return '<span class="ic">'+IC.cpu+'</span><div><span class="lbl">CPU</span><div class="say">'+say+'</div></div>'+(p===null?'':sheet(p,'sm'));
 }
-function renderStage(st){
+function renderStage(st,req){
   const n=S.n,frames=st?st.frames:Array(n).fill(null),full=st?st.queue.length===n:false;
-  $('#cpu').innerHTML=st?cpuHTML(st.p,'pidió la página '+st.p):cpuHTML(null,'esperando la primera petición');
+  $('#cpu').innerHTML=req!==undefined?cpuHTML(req,'pide la página '+req):(st?cpuHTML(st.p,'pidió la página '+st.p):cpuHTML(null,'esperando la primera petición'));
   $('#ramInfo').textContent=n+' '+mw(n)+' · caben '+n+' '+(n===1?'hoja':'hojas');
   const fr=$('#frames'); fr.classList.toggle('dense',n>=4);
   fr.innerHTML=frames.map((p,s)=>{
@@ -495,9 +517,9 @@ function flowHTML(st,lvl){
   ];
   return '<div class="flow-t">¿Qué decide FIFO en cada petición?</div>'+n.map((x,i)=>'<div class="fn '+x.c+'"><span class="nn">'+(i+1)+'</span><div class="q">'+x.q+'</div>'+x.a+'</div>').join('');
 }
-function renderStats(st){
+function renderStats(st,stepNo){
   const F=st?st.faults:0,H=st?st.hits:0;
-  $('#stats').innerHTML='<div class="stat f"><b>'+F+'</b><span>Fallos</span></div><div class="stat h"><b>'+H+'</b><span>Aciertos</span></div><div class="stat"><b>'+S.pos+'<small style="font-size:13px;color:var(--muted)">/'+S.seq.length+'</small></b><span>Paso</span></div>';
+  $('#stats').innerHTML='<div class="stat f"><b>'+F+'</b><span>Fallos</span></div><div class="stat h"><b>'+H+'</b><span>Aciertos</span></div><div class="stat"><b>'+stepNo+'<small style="font-size:13px;color:var(--muted)">/'+S.seq.length+'</small></b><span>Paso</span></div>';
 }
 function nar(kind,icon,h,p,extra=''){
   const el=$('#nar'); el.className='nar '+kind;
@@ -547,108 +569,215 @@ function fly(fromEl,toEl,p,ms){
     const dx=b.left+b.width/2-cx,dy=b.top+b.height/2-cy;
     const an=el.animate([{transform:'translate(0,0) scale(.6) rotate(-6deg)'},{transform:'translate('+dx/2+'px,'+(dy/2-40)+'px) scale(1.15) rotate(5deg)',offset:.5},{transform:'translate('+dx+'px,'+dy+'px) scale(.95) rotate(0)'}],
       {duration:ms/S.speed,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'});
-    const done=()=>{el.remove();res();};an.onfinish=done;an.oncancel=done;
+    let fin=false;const done=()=>{if(fin)return;fin=true;el.remove();res();};
+    an.onfinish=done;an.oncancel=done;setTimeout(done,ms/S.speed+300);
   });
-}
-function cancelRun(){
-  S.token++;S.busy=false;
-  if(S.awaiting){const r=S.awaiting.resolve;S.awaiting=null;r(null);}
-  $$('.fly').forEach(e=>e.remove());
 }
 const frameEl=s=>$('.frame[data-slot="'+s+'"]');
-async function runStep(k){
-  if(S.busy||k>=sim.steps.length) return false;
-  S.busy=true;S.runK=k;const my=++S.token,alive=()=>my===S.token,st=sim.steps[k];
-  try{
-    $$('.rchip').forEach(e=>e.classList.toggle('cur',+e.dataset.i===k));
-    $('#cpu').innerHTML=cpuHTML(st.p,'pide la página '+st.p);
-    $('#flow').innerHTML=flowHTML(st,1);
-    nar('info',IC.search,'La CPU pide la página '+st.p,'Antes de usarla, el sistema revisa en la tabla de páginas si ya está en la RAM.');
-    const row=$('#pt tr[data-p="'+st.p+'"]');if(row)row.classList.add('lookup');
-    await wait(1100);if(!alive())return false;
-    $('#flow').innerHTML=flowHTML(st,2);
-    if(st.hit){
-      const fr=frameEl(st.slot);if(fr){fr.classList.add('hit');if(!fr.querySelector('.badge'))fr.insertAdjacentHTML('beforeend','<div class="badge">'+IC.check+'Acierto</div>');}
-      nar('hit',IC.check,'¡Acierto! La '+st.p+' ya estaba en el marco '+st.slot,'No hay que ir al archivero y la fila no cambia.');
-      await wait(1200);if(!alive())return false;
-      $('#flow').innerHTML=flowHTML(st,4);
-    } else {
-      if(row){row.classList.remove('lookup');row.classList.add('miss');}
-      nar('fault',IC.alert,'Fallo de página: la '+st.p+' no está en la RAM','No es un error. Solo significa que hay que traer la hoja del archivero.');
-      await wait(1200);if(!alive())return false;
-      $('#flow').innerHTML=flowHTML(st,3);
-      const card=p=>$('.ssd-card[data-p="'+p+'"]');
-      if(st.full){
-        nar('evict',IC.out,'La RAM está llena','No hay marcos libres. FIFO saca la hoja que lleva más tiempo: la '+st.evicted+' (llegó en el paso '+(st.evLoad+1)+').');
-        if(S.predict){const ok=await askPrediction(st);if(!alive()||ok===null)return false;}
-        const fr=frameEl(st.evSlot);
-        if(fr){fr.classList.remove('pick','wrong');fr.classList.add('victim');if(!fr.querySelector('.badge'))fr.insertAdjacentHTML('beforeend','<div class="badge">'+IC.out+'Sale</div>');}
-        await wait(1000);if(!alive())return false;
-        $('#flow').innerHTML=flowHTML(st,4);
-        const body=fr&&fr.querySelector('.fbody'),sh=body&&body.querySelector('.sheet');
-        if(sh)sh.style.visibility='hidden';
-        await fly(body,card(st.evicted),st.evicted,800);if(!alive())return false;
-      } else {
-        nar('fault',IC.inn,'Hay un marco libre','La hoja '+st.p+' se copia del archivero al marco '+st.slot+'.');
-        await wait(900);if(!alive())return false;
-        $('#flow').innerHTML=flowHTML(st,4);
-      }
-      const src=card(st.p);if(src)src.classList.add('src');
-      const target=frameEl(st.slot);
-      await fly(src,target&&target.querySelector('.fbody'),st.p,900);if(!alive())return false;
-    }
-    S.pos=k+1;renderSim();return true;
-  } finally { if(my===S.token) S.busy=false; }
+const ssdCard=p=>$('.ssd-card[data-p="'+p+'"]');
+function mark(fr,cls,icon,text){
+  if(!fr) return;
+  fr.classList.remove('hit','new','victim','pick','wrong'); fr.classList.add(cls);
+  const old=fr.querySelector('.badge'); if(old) old.remove();
+  fr.insertAdjacentHTML('beforeend','<div class="badge">'+icon+text+'</div>');
 }
-function askPrediction(st){
+async function flyOut(slot,p){
+  const fr=frameEl(slot),body=fr&&fr.querySelector('.fbody'),sh=body&&body.querySelector('.sheet');
+  if(sh) sh.style.visibility='hidden';
+  await fly(body,ssdCard(p),p,800);
+}
+async function flyIn(slot,p){
+  const c=ssdCard(p); if(c) c.classList.add('src');
+  const fr=frameEl(slot);
+  await fly(c,fr&&fr.querySelector('.fbody'),p,900);
+}
+
+/* ---------- fases de cada paso ---------- */
+// Cada petición se recorre en fases. S.cur = {k: petición, i: fase}; i=-1 es el inicio, antes de todo.
+// La última fase de cada petición es el estado final de ese paso.
+function phasesOf(k){
+  const st=sim.steps[k];
+  if(st.hit) return ['pide','consulta','accion'];
+  if(!st.full) return ['pide','consulta','espacio','entra'];
+  return ['pide','consulta','llena','marca','sale','entra'];
+}
+const LV={pide:1,consulta:2,espacio:3,llena:3,marca:3,sale:4,accion:5,entra:5};
+const lastI=k=>phasesOf(k).length-1;
+const startCur=()=>({k:0,i:-1});
+const endCurOf=pos=>pos<=0?startCur():{k:pos-1,i:lastI(pos-1)};
+const resting=()=>S.cur.i<0||S.cur.i===lastI(S.cur.k);
+const atEnd=()=>S.cur.k===S.seq.length-1&&S.cur.i===lastI(S.cur.k);
+function nextCur(c){
+  if(c.i<lastI(c.k)) return {k:c.k,i:c.i+1};
+  return c.k<S.seq.length-1?{k:c.k+1,i:0}:null;
+}
+function prevCur(c){
+  if(c.i>0) return {k:c.k,i:c.i-1};
+  if(c.i===0) return c.k>0?{k:c.k-1,i:lastI(c.k-1)}:startCur();
+  return null;
+}
+function synth(b,a){ // la RAM justo después de que sale la hoja más antigua
+  const idx=b.qslots.indexOf(a.evSlot),frames=b.frames.slice();frames[a.evSlot]=null;
+  return {...b,frames,queue:b.queue.filter((_,j)=>j!==idx),qslots:b.qslots.filter((_,j)=>j!==idx),qtimes:b.qtimes.filter((_,j)=>j!==idx)};
+}
+function renderCur(){
+  const {k,i}=S.cur;
+  if(i<0){S.pos=0;renderSim();return;}
+  if(i===lastI(k)){S.pos=k+1;renderSim();return;}
+  S.pos=k;renderMid(k,phasesOf(k)[i]);
+}
+function renderMid(k,ph){
+  const before=stAt(k),after=sim.steps[k],p=after.p;
+  let st=before?{...before,hit:true,slot:-1}:null;
+  if(ph==='sale') st=synth(st,after);
+  renderRail(k,k); renderStage(st,p);
+  $('#flow').innerHTML=flowHTML(after,LV[ph]);
+  renderStats(before,k+1);
+  $('#trace').innerHTML=traceHTML(k); scrollTrace();
+  const row=$('#pt tr[data-p="'+p+'"]');
+  if(row){ if(ph==='pide'||(ph==='consulta'&&after.hit)) row.classList.add('lookup'); else if(!after.hit) row.classList.add('miss'); }
+  if(ph==='pide') nar('info',IC.search,'La CPU pide la página '+p,'Antes de usarla, el sistema revisa en la tabla de páginas si ya está en la RAM.');
+  else if(ph==='consulta'){
+    if(after.hit){ mark(frameEl(after.slot),'hit',IC.check,'Acierto'); nar('hit',IC.check,'¡Acierto! La '+p+' ya estaba en el marco '+after.slot,'No hay que ir al archivero y la fila no cambia.'); }
+    else nar('fault',IC.alert,'Fallo de página: la '+p+' no está en la RAM','No es un error. Solo significa que hay que traer la hoja del archivero.');
+  }
+  else if(ph==='espacio') nar('fault',IC.inn,'Hay un marco libre','La hoja '+p+' se copia del archivero al marco '+after.slot+'.');
+  else if(ph==='llena') nar('evict',IC.out,'La RAM está llena','No hay marcos libres. FIFO debe sacar una hoja: la que lleva más tiempo, la '+after.evicted+' (llegó en el paso '+(after.evLoad+1)+').');
+  else if(ph==='marca'){ mark(frameEl(after.evSlot),'victim',IC.out,'Sale'); nar('evict',IC.out,'La que sale es la '+after.evicted,'Es la primera de la fila: lleva más tiempo en la RAM que las demás.'); }
+  else if(ph==='sale') nar('evict',IC.out,'La '+after.evicted+' volvió al archivero','Sigue guardada ahí. El marco '+after.evSlot+' queda libre para la '+p+'.');
+  updateTransport();
+}
+async function flights(from,to){
+  if(from.k!==to.k||from.i<0) return;
+  const st=sim.steps[from.k],ph=phasesOf(from.k),a=ph[from.i],b=ph[to.i];
+  if(a==='marca'&&b==='sale') await flyOut(st.evSlot,st.evicted);
+  else if((a==='sale'||a==='espacio')&&b==='entra') await flyIn(st.slot,st.p);
+  else if(a==='entra'&&(b==='sale'||b==='espacio')) await flyOut(st.slot,st.p);
+  else if(a==='sale'&&b==='marca') await flyIn(st.evSlot,st.evicted);
+}
+async function moveTo(to){
+  if(S.anim) return false;
+  const my=S.token,from=S.cur; S.anim=true; updateTransport();
+  try{
+    await flights(from,to);
+    if(my!==S.token) return false;
+    S.cur=to; renderCur();
+  } finally { if(my===S.token){S.anim=false;updateTransport();} }
+  return true;
+}
+
+/* ---------- predicción ---------- */
+function askPrediction(k){
   return new Promise(resolve=>{
-    const cands=st.qslots.map(s=>frameEl(s));cands.forEach(f=>f&&f.classList.add('pick'));
+    const st=sim.steps[k],cands=stAt(k).qslots.map(s=>frameEl(s));
+    cands.forEach(f=>f&&f.classList.add('pick'));
     nar('info',IC.search,'Tu turno: ¿cuál sale?','La RAM está llena y entra la '+st.p+'. Según FIFO, ¿qué hoja debe salir? Toca su marco.');
-    S.awaiting={st,resolve:v=>{cands.forEach(f=>f&&f.classList.remove('pick'));resolve(v);}};
+    S.awaiting={k,resolve}; updateTransport();
   });
+}
+function cancelAwait(){
+  if(!S.awaiting) return;
+  const r=S.awaiting.resolve; S.awaiting=null;
+  $$('.frame.pick').forEach(f=>f.classList.remove('pick')); r(null);
 }
 function handleFramePick(e){
   const fr=e.target.closest('.frame.pick');if(!fr||!S.awaiting)return;
-  const {st,resolve}=S.awaiting,s=+fr.dataset.slot,prev=sim.steps[st.i-1],chosen=prev.frames[s],ok=(s===st.evSlot);
-  S.score.total++;if(ok)S.score.ok++;S.awaiting=null;
+  const {k,resolve}=S.awaiting,st=sim.steps[k],before=stAt(k),s=+fr.dataset.slot,chosen=before.frames[s],ok=(s===st.evSlot);
+  S.score.total++;if(ok)S.score.ok++;S.awaiting=null;S.hold=true;S.answered.add(k);
   $$('.frame.pick').forEach(f=>f.classList.remove('pick'));
   if(ok) nar('hit',IC.check,'¡Correcto! Sale la '+st.evicted,'Llegó en el paso '+(st.evLoad+1)+', antes que las demás. Llevas '+S.score.ok+' de '+S.score.total+'.');
-  else{ fr.classList.add('wrong'); nar('evict',IC.alert,'No es esa: FIFO saca la '+st.evicted,'Elegiste la '+chosen+', que llegó en el paso '+(prev.loadT[s]+1)+'. La '+st.evicted+' llegó en el paso '+(st.evLoad+1)+', así que lleva más tiempo. Llevas '+S.score.ok+' de '+S.score.total+'.'); }
-  setTimeout(()=>resolve(true),reduce?0:2200/S.speed);
+  else{ fr.classList.add('wrong'); nar('evict',IC.alert,'No es esa: FIFO saca la '+st.evicted,'Elegiste la '+chosen+', que llegó en el paso '+(before.loadT[s]+1)+'. La '+st.evicted+' llegó en el paso '+(st.evLoad+1)+', así que lleva más tiempo. Llevas '+S.score.ok+' de '+S.score.total+'.'); }
+  setTimeout(()=>{S.hold=false;resolve(true);},reduce?0:2200/S.speed);
 }
 
 /* ---------- controles ---------- */
-function updateTransport(){
-  const N=S.seq.length;
-  $('#playTxt').textContent=S.playing?'Pausa':(S.pos>=N?'Repetir':'Reproducir');
-  $('#playIcon').innerHTML=S.playing?'<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>':'<path d="M7 4l13 8-13 8z"/>';
-  $('#bPrev').disabled=S.pos<=0&&!S.busy;$('#bNext').disabled=S.pos>=N&&!S.busy;
+function nextLabel(){
+  const to=nextCur(S.cur); if(!to) return null;
+  const st=sim.steps[to.k],ph=phasesOf(to.k)[to.i];
+  switch(ph){
+    case 'pide': return 'pedir la página '+st.p;
+    case 'consulta': return '¿Está en la RAM?';
+    case 'espacio': case 'llena': return '¿Hay un marco libre?';
+    case 'marca': return S.predict&&!S.answered.has(to.k)?'adivinar cuál sale':'marcar la que sale';
+    case 'sale': return 'sacar la '+st.evicted+' de la RAM';
+    case 'entra': return st.full?'meter la '+st.p+' en el marco '+st.slot:'cargar la hoja '+st.p;
+    default: return 'terminar este paso';
+  }
 }
-function jump(pos){cancelRun();S.playing=false;S.pos=Math.max(0,Math.min(S.seq.length,pos));renderSim();}
+function updateTransport(){
+  const N=S.seq.length,to=nextCur(S.cur),pc=prevCur(S.cur),busy=S.anim||!!S.awaiting||S.hold;
+  $('#playTxt').textContent=S.playing?'Pausa':(atEnd()?'Repetir':'Reproducir');
+  $('#playIcon').innerHTML=S.playing?'<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>':'<path d="M7 4l13 8-13 8z"/>';
+  $('#bNext').disabled=!to||busy; $('#bPrev').disabled=!pc||busy;
+  $('#nextTxt').textContent=S.manual?(resting()?'Siguiente paso':'Siguiente fase'):'Siguiente';
+  $('#prevTxt').textContent=S.manual?'Fase anterior':'Anterior';
+  $('#bPhase').hidden=!S.manual; $('#bPhasePrev').hidden=!S.manual;
+  $('#bPhase').disabled=!to||busy; $('#bPhasePrev').disabled=!pc||busy;
+  $('#phaseTxt').textContent=to?((resting()?'Siguiente paso: ':'Siguiente fase: ')+nextLabel()):'Fin de la simulación';
+}
+function cancelRun(){
+  S.token++;S.anim=false;S.hold=false;cancelAwait();
+  $$('.fly').forEach(e=>e.remove());
+}
+function jump(pos){
+  cancelRun();S.playing=false;
+  S.cur=endCurOf(Math.max(0,Math.min(S.seq.length,pos)));renderCur();
+}
+async function forward(){
+  if(S.anim||S.awaiting||S.hold) return false;
+  const to=nextCur(S.cur); if(!to) return false;
+  if(S.cur.i>=0&&phasesOf(S.cur.k)[S.cur.i]==='llena'&&S.predict&&!S.answered.has(S.cur.k)){
+    const ok=await askPrediction(S.cur.k); if(!ok) return false;
+  }
+  return moveTo(to);
+}
 async function play(){
   if(S.playing){S.playing=false;updateTransport();return;}
-  if(S.pos>=S.seq.length){S.pos=0;S.score={ok:0,total:0};renderSim();}
-  S.playing=true;updateTransport();
-  while(S.playing&&S.pos<S.seq.length){const ok=await runStep(S.pos);if(!ok)break;if(!S.playing)break;await wait(500);}
-  S.playing=false;updateTransport();
+  if(atEnd()){S.score={ok:0,total:0};S.answered=new Set();jump(0);}
+  const my=S.token; S.playing=true;updateTransport();
+  while(S.playing&&my===S.token&&!atEnd()){
+    const ok=await forward(); if(!ok) break;
+    await wait(900);
+  }
+  if(my===S.token){S.playing=false;updateTransport();}
 }
 async function next(){
   S.playing=false;
-  if(S.busy){const k=S.runK;cancelRun();S.pos=k+1;renderSim();return;}
-  await runStep(S.pos);updateTransport();
+  if(S.manual){ updateTransport(); await forward(); return; }
+  // sin fases manuales: completa la petición actual
+  const my=S.token,targetK=S.cur.i<0?0:(resting()?S.cur.k+1:S.cur.k);
+  if(targetK>=S.seq.length) return;
+  while(my===S.token){
+    const ok=await forward(); if(!ok) break;
+    if(S.cur.k===targetK&&S.cur.i===lastI(targetK)) break;
+    await wait(900);
+  }
+}
+async function prev(){
+  if(S.hold||S.anim) return;
+  S.playing=false; cancelAwait();
+  if(S.manual){ const to=prevCur(S.cur); if(to) await moveTo(to); else updateTransport(); return; }
+  jump(resting()?S.pos-1:S.pos);
 }
 function initSim(){
-  $('#bPlay').onclick=play;$('#bNext').onclick=next;$('#bPrev').onclick=()=>jump(S.pos-1);$('#bReset').onclick=()=>{S.score={ok:0,total:0};jump(0);};
+  $('#bPlay').onclick=play;$('#bNext').onclick=next;$('#bPrev').onclick=prev;
+  $('#bPhase').onclick=next;$('#bPhasePrev').onclick=prev;
+  $('#bReset').onclick=()=>{S.score={ok:0,total:0};S.answered=new Set();jump(0);};
   $('#speed').oninput=e=>{S.speed=+e.target.value;$('#speedOut').textContent=S.speed+'×';};
-  $('#predict').onchange=e=>{S.predict=e.target.checked;};
+  $('#predict').onchange=e=>{S.predict=e.target.checked;updateTransport();};
+  $('#manual').onchange=e=>{S.manual=e.target.checked;updateTransport();};
   $('#rail').onclick=e=>{const b=e.target.closest('[data-i]');if(b)jump(+b.dataset.i+1);};
   $('#frames').onclick=handleFramePick;
   document.addEventListener('keydown',e=>{
-    if(/INPUT|TEXTAREA/.test(e.target.tagName)||(e.target.closest('button')&&e.key===' '))return;
-    if(e.key===' '){e.preventDefault();play();}else if(e.key==='ArrowRight')next();else if(e.key==='ArrowLeft')jump(S.pos-1);else if(e.key==='r'||e.key==='R')jump(0);
+    if(/INPUT|TEXTAREA/.test(e.target.tagName)||(e.target.closest('button')&&(e.key===' '||e.key==='Enter')))return;
+    if(e.key==='Enter'&&S.manual){e.preventDefault();next();}
+    else if(e.key===' '){e.preventDefault();play();}
+    else if(e.key==='ArrowRight')next();
+    else if(e.key==='ArrowLeft')prev();
+    else if(e.key==='r'||e.key==='R'){S.answered=new Set();jump(0);}
   });
 }
-initConfig();initSim();recompute();renderConfig();renderSim();
+initConfig();initSim();recompute();renderConfig();renderCur();
 </script>
 
 </body></html>
